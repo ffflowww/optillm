@@ -1,7 +1,10 @@
 from typing import List, Tuple
 from optillm.cot_decoding import aggregate_paths_based_on_scores
 import numpy as np
-import warnings
+from transformers import AutoTokenizer
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def calculate_confidence_logprobs(logprobs: List[List[float]], answer_indexes: List[int]) -> float:
@@ -21,7 +24,7 @@ def calculate_confidence_logprobs(logprobs: List[List[float]], answer_indexes: L
     lp_len = len(logprobs)
     for ti in answer_indexes:
         if ti >= lp_len:
-            warnings.warn("Provided answer index is out of range!", UserWarning)
+            logger.warning("Provided answer index is out of range!")
             break
 
         probs = np.exp(logprobs[ti])  # Convert log-probabilities to probabilities
@@ -34,43 +37,34 @@ def calculate_confidence_logprobs(logprobs: List[List[float]], answer_indexes: L
     return confidence_sum / valid_tokens if valid_tokens > 0 else 0.0
 
 
-def build_qwen_chat_prompt(system_message, user_message):
-    # Start with the system message
-    prompt = "<|im_start|>system\n"
-    prompt += f"{system_message}"
-    prompt += "<|im_end|>\n"
-
-    prompt += "<|im_start|>user\n"
-    prompt += f"{user_message}"
-    prompt += "<|im_end|>\n"
-
-    prompt += "<|im_start|>assistant\n"
-
-    return prompt
-
-
 def cot_decode_vllm(
-    base_prompt: str,
-    client,
-    model: str,
-    k: int = 10,
-    max_new_tokens: int = 512,
-    temperature: float = 1.0,
-    top_p: float = 1.0,
-    aggregate_paths: bool = False,
-    is_return_all: bool = False,
+        system_prompt: str,
+        user_prompt: str,
+        client,
+        model: str,
+        n_paths: int = 10,
+        max_new_tokens: int = 512,
+        temperature: float = 1.0,
+        top_p: float = 1.0,
+        answer_keywords: str = "",
+        tokenizer_name: str = "",
+        aggregate_paths: bool = False,
+        is_return_all: bool = False,
 ) -> Tuple[str, float] | List[Tuple[str, float]]:
     """
     Implement CoT-decoding for a given chat input.
     
     Args:
-        base_prompt: Full prompt with special symbols and formatting (model specific(!))
+        system_prompt: string.
+        user_prompt: string.
         client: OpenAI client object
         model: model name
-        k: The number of alternative tokens to consider at the first step.
+        n_paths: The number of alternative tokens to consider at the first step.
         max_new_tokens: Maximum number of new tokens to generate.
         temperature: Sampling temperature.
         top_p: Nucleus sampling probability.
+        answer_keywords: Everything behind that substring is treated as answer to the question
+        tokenizer_name: specific tokenizer name (if different from the model name)
         aggregate_paths: Whether to aggregate multiple paths.
         is_return_all: Returns all generated paths and its confidence scores
 
@@ -78,40 +72,58 @@ def cot_decode_vllm(
         A tuple containing the best path (or aggregated result) and its confidence score.
     """
 
+    # Building base prompt with model's tokenizer
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt}
+    ]
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name) if tokenizer_name else AutoTokenizer.from_pretrained(model)
+    base_prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+
     # Get the top-k tokens for the first decoding step (API call)
-    completion = client.completions.create(
+    completion_init = client.completions.create(
         model=model,
         prompt=base_prompt,
         temperature=temperature,
         top_p=top_p,
         max_tokens=1,
-        logprobs=k,
+        logprobs=n_paths,
     )
-    top_tokens_full = completion.choices[0].logprobs.top_logprobs[0]
+    top_tokens_full = completion_init.choices[0].logprobs.top_logprobs[0]
     top_tokens = [key for key in top_tokens_full]
 
     # Generating all paths
     paths = []
-    for token in top_tokens:
-        prompt = base_prompt + token
-        completion = client.completions.create(
-            model=model,
-            prompt=prompt,
-            temperature=temperature,
-            top_p=top_p,
-            max_tokens=max_new_tokens - 1,
-            logprobs=2,
-        )
+    prompts = [base_prompt + token for token in top_tokens]
+    completions = client.completions.create(
+        model=model,
+        prompt=prompts,
+        temperature=temperature,
+        top_p=top_p,
+        max_tokens=max_new_tokens - 1,
+        logprobs=2,
+    )
 
-        answer_text = token + completion.choices[0].text
-        tokens_with_log_probs = completion.choices[0].logprobs.top_logprobs
+    for i, completion in enumerate(completions.choices):
+        answer_text = top_tokens[i] + completion.text
+        tokens_with_log_probs = completion.logprobs.top_logprobs
         probs = [[*item.values()] for item in tokens_with_log_probs]
 
-        # Calculate confidence score (Δ)
-        answer_indxs = [i for i in range(len(probs))]  # calculating certainty based on all tokens
-        # actually we need to calculate confidence only for "Result" tokens, not all tokens
-        confidence = calculate_confidence_logprobs(probs, answer_indxs)
+        # Calculate confidence scores
+        answer_indexes = [i for i in range(len(probs))]  # calculating certainty based on all tokens
+        res_text = "||all_text||"  # just a placeholder for pretty print in logger
+        if answer_keywords:
+            ida = answer_text.rfind(answer_keywords)
+            if ida == -1:
+                logger.warning("Provided answer keywords are not found in the answer! "
+                               "Falling back to calculating confidence for the whole answer.")
+            else:
+                res_text = answer_text[ida + len(answer_keywords):]  # real answer text here
+                n_last_tokens = len(tokenizer.encode(res_text))  # count how many tokens there
+                answer_indexes = answer_indexes[-n_last_tokens:]  # using only those last tokens for confidence
+        confidence = calculate_confidence_logprobs(probs, answer_indexes)
         paths.append((answer_text, confidence))
+        logger.info(f"CoT decode {i+1}/{n_paths}\nConfidence: {confidence}\nReal answer for confidence scoring:{res_text}\n{answer_text}")
 
     if is_return_all:
         return paths

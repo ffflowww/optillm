@@ -28,7 +28,7 @@ from optillm.cot_reflection import cot_reflection
 from optillm.plansearch import plansearch
 from optillm.leap import leap
 from optillm.reread import re2_approach
-from optillm.cot_decoding_vllm import cot_decode_vllm, build_qwen_chat_prompt
+from optillm.cot_decoding_vllm import cot_decode_vllm
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -95,11 +95,18 @@ server_config = {
     'return_full_response': False,
     'port': 8000,
     'log': 'info',
+
+    'cot_n_paths': 10,
+    'cot_max_new_tokens': 512,
+    'cot_temperature': 1.0,
+    'cot_top_p': 1.0,
+    'cot_answer_keywords': 'Answer:',
+    'cot_tokenizer_name': ''
 }
 
 # List of known approaches
 known_approaches = ["mcts", "bon", "moa", "rto", "z3", "self_consistency", "pvg", "rstar",
-                    "cot_reflection", "plansearch", "leap", "re2", "cot_decode_vllm_qwen"]
+                    "cot_reflection", "plansearch", "leap", "re2", "cot_decode_vllm"]
 
 plugin_approaches = {}
 
@@ -183,8 +190,14 @@ def execute_single_approach(approach, system_prompt, initial_query, client, mode
             return leap(system_prompt, initial_query, client, model)
         elif approach == 're2':
             return re2_approach(system_prompt, initial_query, client, model, n=server_config['n'])
-        elif approach == 'cot_decode_vllm_qwen':
-            return cot_decode_vllm(build_qwen_chat_prompt(system_prompt, initial_query), client, model)
+        elif approach == 'cot_decode_vllm':
+            return cot_decode_vllm(system_prompt, initial_query, client, model,
+                                   n_paths=server_config['cot_n_paths'],
+                                   max_new_tokens=server_config['cot_max_new_tokens'],
+                                   temperature=server_config['cot_temperature'],
+                                   top_p=server_config['cot_top_p'],
+                                   answer_keywords=server_config['cot_answer_keywords'],
+                                   tokenizer_name=server_config['cot_tokenizer_name'])
     elif approach in plugin_approaches:
         return plugin_approaches[approach](system_prompt, initial_query, client, model)
     else:
@@ -402,7 +415,13 @@ def parse_args():
         ("--n", "OPTILLM_N", int, 1, "Number of final responses to be returned"),
         ("--return-full-response", "OPTILLM_RETURN_FULL_RESPONSE", bool, False, "Return the full response including the CoT with <thinking> tags"),
         ("--port", "OPTILLM_PORT", int, 8000, "Specify the port to run the proxy"),
-        ("--log", "OPTILLM_LOG", str, "info", "Specify the logging level", list(logging_levels.keys()))
+        ("--log", "OPTILLM_LOG", str, "info", "Specify the logging level", list(logging_levels.keys())),
+        ("--cot_n_paths", "OPTILLM_COT_N_PATH", int, 10, "Number of paths generated with COT"),
+        ("--cot_max_new_tokens", "OPTILLM_COT_MAX_TOKENS", int, 512, "Maximum number of tokens generated with COT"),
+        ("--cot_temperature", "OPTILLM_TEMPERATURE", float, 1.0, "Temperature with COT"),
+        ("--cot_top_p", "OPTILLM_TOP_P", float, 1.0, "top_p parameter with COT"),
+        ("--cot_answer_keywords", "OPTILLM_ANSWER_KEYWORDS", str, "Answer:", "Substring that indicates beginning of the real answer"),
+        ("--cot_tokenizer_name", "OPTILLM_TOKENIZER_NAME", str, "", "HF model name for tokenizer (it's needed if model is not a correct HF repo name)"),
     ]
 
     for arg, env, type_, default, help_text, *extra in args_env:
