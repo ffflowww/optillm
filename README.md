@@ -162,6 +162,7 @@ or your own code where you want to use the results from optillm. You can use it 
 | Monte Carlo Tree Search | `mcts`             | Uses MCTS for decision-making in chat responses                                                |
 | PV Game                 | `pvg`              | Applies a prover-verifier game approach at inference time                                      |
 | CoT Decoding            |  N/A for proxy     | Implements chain-of-thought decoding to elicit reasoning without explicit prompting            |
+| CoT Decoding vllm       |  `cot_decode_vllm` | Implements chain-of-thought decoding to elicit reasoning without explicit prompting for vllm   |
 
 ## Implemented plugins
 
@@ -192,6 +193,12 @@ optillm supports various command-line arguments and environment variables for co
 | `--return-full-response` | Return the full response including the CoT with <thinking> tags | `False`         |
 | `--port`                 | Specify the port to run the proxy                               | 8000            |
 | `--optillm-api-key`      | Optional API key for client authentication to optillm           | `""`            |
+| `--cot_n_paths`          | The number of alternative tokens to consider at the first step  | 10              |
+| `--cot_max_new_tokens`   | Maximum number of new tokens to generate                        | 512             |
+| `--cot_temperature`      | Sampling temperature                                            | 1.0             |
+| `--cot_top_p`            | Nucleus sampling probability                                    | 1.0             |
+| `--cot_answer_keywords`  | Everything behind that is treated as answer to the question     | `"Answer:"`     |
+| `--cot_tokenizer_name`   | specific tokenizer name (if different from the model name)      | `""`            |
 
 When using Docker, these can be set as environment variables prefixed with `OPTILLM_`.
 
