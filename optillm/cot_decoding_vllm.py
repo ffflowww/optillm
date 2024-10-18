@@ -49,7 +49,9 @@ def cot_decode_vllm(
         answer_keywords: str = "",
         tokenizer_name: str = "",
         aggregate_paths: bool = False,
-        is_return_all: bool = False,
+        return_all: bool = False,
+        debug_print: bool = False,
+        return_completion_tokens: bool = False,
 ) -> Tuple[str, float] | List[Tuple[str, float]]:
     """
     Implement CoT-decoding for a given chat input.
@@ -66,11 +68,14 @@ def cot_decode_vllm(
         answer_keywords: Everything behind that substring is treated as answer to the question
         tokenizer_name: specific tokenizer name (if different from the model name)
         aggregate_paths: Whether to aggregate multiple paths.
-        is_return_all: Returns all generated paths and its confidence scores
+        return_all: Returns all generated paths and its confidence scores
+        debug_print: print extra info
+        return_completion_tokens: if it's used internally (returns with completion tokens)
 
     Returns:
         A tuple containing the best path (or aggregated result) and its confidence score.
     """
+    cot_completion_tokens = 0
 
     # Building base prompt with model's tokenizer
     messages = [
@@ -89,8 +94,14 @@ def cot_decode_vllm(
         max_tokens=1,
         logprobs=n_paths,
     )
+    cot_completion_tokens += completion_init.usage.completion_tokens
     top_tokens_full = completion_init.choices[0].logprobs.top_logprobs[0]
-    top_tokens = [key for key in top_tokens_full]
+    # it's needed because vllm sometimes is bugged and returns more tokens than needed
+    top_tokens = sorted(top_tokens_full, key=top_tokens_full.get, reverse=True)[:n_paths]
+    if len(top_tokens) != n_paths:
+        logger.warning(f"The number of paths explored is less than requested! {len(top_tokens)} vs {n_paths}")
+        if debug_print:
+            print(f"The number of paths explored is less than requested! {len(top_tokens)} vs {n_paths}")
 
     # Generating all paths
     paths = []
@@ -103,6 +114,7 @@ def cot_decode_vllm(
         max_tokens=max_new_tokens - 1,
         logprobs=2,
     )
+    cot_completion_tokens += completions.usage.completion_tokens
 
     for i, completion in enumerate(completions.choices):
         answer_text = top_tokens[i] + completion.text
@@ -117,15 +129,22 @@ def cot_decode_vllm(
             if ida == -1:
                 logger.warning("Provided answer keywords are not found in the answer! "
                                "Falling back to calculating confidence for the whole answer.")
+                if debug_print:
+                    print("Provided answer keywords are not found in the answer! "
+                          "Falling back to calculating confidence for the whole answer.")
             else:
                 res_text = answer_text[ida + len(answer_keywords):]  # real answer text here
                 n_last_tokens = len(tokenizer.encode(res_text))  # count how many tokens there
                 answer_indexes = answer_indexes[-n_last_tokens:]  # using only those last tokens for confidence
         confidence = calculate_confidence_logprobs(probs, answer_indexes)
         paths.append((answer_text, confidence))
-        logger.info(f"CoT decode {i+1}/{n_paths}\nConfidence: {confidence}\nReal answer for confidence scoring:{res_text}\n{answer_text}")
+        logger.info(f"[CoT decode {i+1}/{n_paths}]\n[Confidence:] {confidence}\n[Real answer for confidence scoring:] {res_text}\n[Answer:] {answer_text}")
+        if debug_print:
+            print(f"[CoT decode {i+1}/{n_paths}]\n[Confidence:] {confidence}\n[Real answer for confidence scoring:] {res_text}\n[Answer:] {answer_text}")
 
-    if is_return_all:
+    if return_completion_tokens:
+        return max(paths, key=lambda x: x[1])[0], cot_completion_tokens
+    elif return_all:
         return paths
     elif aggregate_paths:
         return aggregate_paths_based_on_scores(paths)

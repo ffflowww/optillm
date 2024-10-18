@@ -197,7 +197,8 @@ def execute_single_approach(approach, system_prompt, initial_query, client, mode
                                    temperature=server_config['cot_temperature'],
                                    top_p=server_config['cot_top_p'],
                                    answer_keywords=server_config['cot_answer_keywords'],
-                                   tokenizer_name=server_config['cot_tokenizer_name'])
+                                   tokenizer_name=server_config['cot_tokenizer_name'],
+                                   return_completion_tokens=True,)
     elif approach in plugin_approaches:
         return plugin_approaches[approach](system_prompt, initial_query, client, model)
     else:
