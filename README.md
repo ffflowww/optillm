@@ -193,12 +193,12 @@ optillm supports various command-line arguments and environment variables for co
 | `--return-full-response` | Return the full response including the CoT with <thinking> tags | `False`         |
 | `--port`                 | Specify the port to run the proxy                               | 8000            |
 | `--optillm-api-key`      | Optional API key for client authentication to optillm           | `""`            |
-| `--cot_n_paths`          | The number of alternative tokens to consider at the first step  | 10              |
-| `--cot_max_new_tokens`   | Maximum number of new tokens to generate                        | 512             |
-| `--cot_temperature`      | Sampling temperature                                            | 1.0             |
-| `--cot_top_p`            | Nucleus sampling probability                                    | 1.0             |
-| `--cot_answer_keywords`  | Everything behind that is treated as answer to the question     | `"Answer:"`     |
-| `--cot_tokenizer_name`   | specific tokenizer name (if different from the model name)      | `""`            |
+| `--cot_n_paths`          | Number of alternative tokens to consider at the first step (CoT)| 10              |
+| `--cot_max_new_tokens`   | Maximum number of new tokens to generate (CoT)                  | 512             |
+| `--cot_temperature`      | Sampling temperature (CoT)                                      | 1.0             |
+| `--cot_top_p`            | Nucleus sampling probability (CoT)                              | 1.0             |
+| `--cot_answer_keywords`  | Everything behind that is treated as the answer (CoT)           | `"Answer:"`     |
+| `--cot_tokenizer_name`   | specific tokenizer name (if different from the model name) (CoT)| `""`            |
 
 When using Docker, these can be set as environment variables prefixed with `OPTILLM_`.
 
